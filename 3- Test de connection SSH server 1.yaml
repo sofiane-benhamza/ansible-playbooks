@@ -1,0 +1,33 @@
+---
+- name: Test SSH connectivity from server1 to server2 and server3
+  hosts: server1
+  become: yes
+  gather_facts: no
+
+  vars:
+    ssh_user: root
+    ssh_targets:
+      - { name: server2, ip: 172.16.2.1 }
+      - { name: server3, ip: 172.16.3.1 }
+
+  tasks:
+
+    - name: Test SSH to other servers
+      ansible.builtin.shell: >
+        ssh -o BatchMode=yes -o ConnectTimeout=5 {{ ssh_user }}@{{ item.ip }} "echo OK"
+      register: ssh_test
+      loop: "{{ ssh_targets }}"
+      ignore_errors: yes
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Display SSH test results
+      ansible.builtin.debug:
+        msg: "SSH from server1 to {{ item.item.name }} ({{ item.item.ip }}): {{ 'SUCCESS' if item.rc == 0 else 'FAIL' }}"
+      loop: "{{ ssh_test.results }}"
+
+    - name: Fail if any SSH connection fails
+      ansible.builtin.fail:
+        msg: "SSH from server1 to {{ item.item.name }} ({{ item.item.ip }}) failed"
+      when: item.rc != 0
+      loop: "{{ ssh_test.results }}"

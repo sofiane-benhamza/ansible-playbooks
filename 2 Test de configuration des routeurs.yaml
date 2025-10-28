@@ -1,0 +1,88 @@
+---
+- name: Verify isolated network configuration on routers
+  hosts: routers
+  become: yes
+  gather_facts: yes
+
+  vars:
+    routers:
+      - name: router1
+        interfaces:
+          - { iface: enp0s3, ip: 172.16.1.254/24 }
+          - { iface: enp0s8, ip: 10.0.2.3/24 }
+        routes:
+          - { dest: 172.16.2.0/24, via: 10.0.2.4 }
+          - { dest: 172.16.3.0/24, via: 10.0.2.5 }
+        nat_iface: enp0s8
+
+      - name: router2
+        interfaces:
+          - { iface: enp0s3, ip: 172.16.2.254/24 }
+          - { iface: enp0s8, ip: 10.0.2.4/24 }
+        routes:
+          - { dest: 172.16.1.0/24, via: 10.0.2.3 }
+          - { dest: 172.16.3.0/24, via: 10.0.2.5 }
+        nat_iface: enp0s8
+
+      - name: router3
+        interfaces:
+          - { iface: enp0s3, ip: 172.16.3.254/24 }
+          - { iface: enp0s8, ip: 10.0.2.5/24 }
+        routes:
+          - { dest: 172.16.1.0/24, via: 10.0.2.3 }
+          - { dest: 172.16.2.0/24, via: 10.0.2.4 }
+        nat_iface: enp0s8
+
+  tasks:
+
+    - name: Select router configuration for this host
+      set_fact:
+        current_router: "{{ item }}"
+      loop: "{{ routers }}"
+      when: item.name == inventory_hostname
+
+    - name: Ensure current_router fact is defined
+      fail:
+        msg: "No configuration found for {{ inventory_hostname }}"
+      when: current_router is not defined
+
+    - name: Check interface IP addresses
+      ansible.builtin.command: ip -4 addr show {{ item.iface }}
+      loop: "{{ current_router.interfaces }}"
+      register: iface_check
+      failed_when: >
+        iface_check.rc != 0 or
+        (item.ip.split('/')[0] not in iface_check.stdout)
+      ignore_errors: no
+      loop_control:
+        label: "{{ item.iface }}"
+
+    - name: Check static routes
+      ansible.builtin.command: ip route show {{ item.dest }}
+      loop: "{{ current_router.routes }}"
+      register: route_check
+      failed_when: >
+        route_check.rc != 0 or
+        ('via ' + item.via) not in route_check.stdout
+      ignore_errors: no
+      loop_control:
+        label: "{{ item.dest }}"
+
+    - name: Check IP forwarding status
+      ansible.builtin.shell: cat /proc/sys/net/ipv4/ip_forward
+      register: ipfwd
+      failed_when: ipfwd.stdout.strip() != "1"
+      changed_when: false
+
+    - name: Check NAT/MASQUERADE configuration
+      ansible.builtin.command: iptables -t nat -L POSTROUTING -n -v
+      register: nat_check
+      failed_when: >
+        'MASQUERADE' not in nat_check.stdout or
+        current_router.nat_iface not in nat_check.stdout
+      changed_when: false
+
+    - name: Display success message
+      ansible.builtin.debug:
+        msg: "all checks passed on {{ inventory_hostname }}"
+
