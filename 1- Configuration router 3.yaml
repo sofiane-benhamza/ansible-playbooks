@@ -13,7 +13,23 @@
     masquerade_iface: enp0s8
 
   tasks:
+    - name: Ensure routes are present
+      ansible.builtin.shell: |
+        echo <<EOF > /etc/sysconfig/network-scripts/ifcfg-{{ iface_name}
+        TYPE=Ethernet
+        BOOTPROTO=static
+        NAME={{ iface_name }}
+        DEVICE={{ iface_device }}
+        ONBOOT=yes
+        IPADDR={{ iface_ip }}
+        NETMASK=255.255.255.0
+        EOF
+      args:
+        executable: /bin/bash
+        
+      ignore_errors: yes 
 
+      
     - name: Ensure routes are present
       ansible.builtin.command: ip route add {{ item.dest }} via {{ item.via }}
       loop: "{{ routes }}"
